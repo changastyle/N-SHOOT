@@ -95,6 +95,9 @@ class _XGrabListener(threading.Thread):
         self.on_fail = on_fail
         self._stop_evt = threading.Event()
         self._disp = None
+        self._root = None
+        self._keycode = 0
+        self._base = 0
         mods, key = normalize_hotkey(combo)
         self._mods = mods
         self._key = key
@@ -103,24 +106,39 @@ class _XGrabListener(threading.Thread):
         if not (HAS_XLIB and self._key):
             self.on_fail()
             return
+        disp = None
         try:
             disp = xlib_display.Display()
             self._disp = disp
+            # Los errores de protocolo (p.ej. BadAccess en GrabKey) llegan
+            # ASINCRÓNICOS: python-xlib por defecto sólo los imprime y el
+            # grab queda silenciosamente sin efecto. Con handler propio los
+            # detectamos tras sync() y caemos al fallback como corresponde.
+            errs = []
+            disp.set_error_handler(lambda err, req: errs.append(err))
             root = disp.screen().root
             ks = XK.string_to_keysym(_keysym_name(self._key))
             keycode = disp.keysym_to_keycode(ks) if ks else 0
             if not keycode:
-                self.on_fail()
-                disp.close()
-                return
+                raise RuntimeError("keysym sin keycode")
             base = 0
             fmap = {"ctrl": X.ControlMask, "alt": X.Mod1Mask,
                     "super": X.Mod4Mask, "shift": X.ShiftMask}
             for m in self._mods:
                 base |= fmap.get(m, 0)
+            self._root = root
+            self._keycode = keycode
+            self._base = base
             self._grab(root, keycode, base)
             disp.sync()
+            if errs:
+                raise RuntimeError(f"grab_key: {errs[0].__class__.__name__}")
         except Exception:
+            try:
+                if disp is not None:
+                    disp.close()
+            except Exception:
+                pass
             self.on_fail()
             return
         while not self._stop_evt.is_set():
@@ -137,19 +155,29 @@ class _XGrabListener(threading.Thread):
                     ks = XK.string_to_keysym(_keysym_name(self._key))
                     keycode = disp.keysym_to_keycode(ks) if ks else 0
                     if keycode:
+                        self._keycode = keycode
                         self._grab(root, keycode, base)
                 except Exception:
                     pass
         try:
-            for extra in _lock_subsets():
-                mask = base
-                for bit in extra:
-                    mask |= bit
-                root.ungrab_key(keycode, mask)
-            disp.flush()
+            self._ungrab()
             disp.close()
         except Exception:
             pass
+
+    def _ungrab(self):
+        """Libera todas las variantes del grab en la conexión propia.
+        Thread-safe: python-xlib serializa los envíos; puede llamarse desde
+        stop() mientras el hilo está bloqueado en next_event()."""
+        disp, root, keycode, base = self._disp, self._root, self._keycode, self._base
+        if disp is None or root is None or not keycode:
+            return
+        for extra in _lock_subsets():
+            mask = base
+            for bit in extra:
+                mask |= bit
+            root.ungrab_key(keycode, mask)
+        disp.flush()
 
     def _grab(self, root, keycode, base):
         for extra in _lock_subsets():
@@ -161,10 +189,20 @@ class _XGrabListener(threading.Thread):
     def stop(self):
         self._stop_evt.set()
         try:
-            if self._disp is not None:
-                self._disp.close()
+            # Liberar los grabs ANTES de cerrar: si la conexión muere con los
+            # passive grabs aún activos, el server tarda en soltarlos y el
+            # próximo grab_key (re-registro al guardar preferencias) recibe
+            # BadAccess y el hotkey queda muerto.
+            self._ungrab()
         except Exception:
             pass
+        try:
+            if self._disp is not None:
+                self._disp.close()   # desbloquea next_event() del hilo
+        except Exception:
+            pass
+        if self.is_alive():
+            self.join(timeout=0.5)   # no re-grabar hasta que el hilo murió
 
 
 class _PynputListener:

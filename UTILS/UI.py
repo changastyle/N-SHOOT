@@ -11,6 +11,7 @@ El hotkey global sí corre en su propio hilo (XGrabListener, hotkeys.py).
 
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -63,6 +64,7 @@ class ScreenshotApp(QObject):
         super().__init__()
         self.qapp = qapp
         self.cfg = load_config()
+        self._last_trigger = 0.0   # detección manual de doble clic (SNI)
         self._overlay = None
         self._frozen = None
         self._img_origin = QPoint(0, 0)
@@ -76,14 +78,24 @@ class ScreenshotApp(QObject):
 
     # ------------------------------------------------------------- tray
     def _tray_icon(self) -> QIcon:
-        # Preferimos el SVG embebido (SVGIconGenerator): no depende de
-        # archivos externos y siempre produce pixmaps reales para SNI.
+        # Cargamos el icono persistido (~/.config/screenshot-tool/icon.svg):
+        # así el ícono que se ve en el tray es siempre el mismo archivo
+        # generado, aunque cambie entre sesiones. Si no existe aún, se
+        # genera y se guarda en el primer arranque.
         svg_text = ""
         try:
-            from UTILS.SVGIconGenerator import build_svg
-            svg_text = build_svg()
-        except Exception:
+            from UTILS.SVGIconGenerator import ensure_saved_icon
+            icon_file = ensure_saved_icon()
+            if icon_file:
+                svg_text = icon_file.read_text(encoding="utf-8")
+        except (ImportError, OSError):
             pass
+        if not svg_text:
+            try:
+                from UTILS.SVGIconGenerator import build_svg
+                svg_text = build_svg()
+            except Exception:
+                pass
         if not svg_text:
             root = Path(__file__).resolve().parent.parent
             for rel in ("icon.svg", "CI-CD-LOCAL/ICONS/icon.svg"):
@@ -147,9 +159,24 @@ class ScreenshotApp(QObject):
         # dentro del handler D-Bus puede quedar atrapado por el grab del
         # click y el menú se cierra al instante.
         menu = self.tray.contextMenu()
-        if (reason in (QSystemTrayIcon.ActivationReason.Trigger,
-                       QSystemTrayIcon.ActivationReason.Context)
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            # XEmbed reporta doble clic nativo.
+            self._last_trigger = 0.0
+            self._open_folder()
+        elif reason == QSystemTrayIcon.ActivationReason.Trigger:
+            # StatusNotifierItem no distingue doble clic: manda Trigger dos
+            # veces. Si dos Triggers caen dentro del intervalo de doble clic
+            # del sistema, lo tratamos como doble clic → abrir carpeta.
+            now = time.monotonic()
+            if now - self._last_trigger <= QApplication.doubleClickInterval() / 1000.0:
+                self._last_trigger = 0.0
+                self._open_folder()
+            else:
+                self._last_trigger = now
+        elif (reason == QSystemTrayIcon.ActivationReason.Context
                 and menu and not menu.isVisible()):
+            # Clic derecho → menú (en Cinnamon el applet ya lo dibuja vía
+            # dbusmenu; este popup cubre el fallback XEmbed).
             QTimer.singleShot(0, lambda: menu.popup(QCursor.pos()))
 
     # ----------------------------------------------------------- hotkey
@@ -318,32 +345,36 @@ class ScreenshotApp(QObject):
         self.qapp.quit()
 
 
-def single_instance():
-    """Devuelve el QLocalServer si somos la única instancia, None si ya hay otra.
-    El server se devuelve para que el llamador mantenga la referencia viva."""
-    key = "screenshot-tool-singleton"
+_INSTANCE_KEY = "screenshot-tool-singleton"
+
+
+def already_running() -> bool:
+    """True si otra instancia ya levantó el lock. Corre ANTES de crear
+    QApplication: QLocalSocket opera síncrono sin event loop, y salir sin
+    Qt construido evita el proceso zombie que dejaba sys.exit() con
+    QApplication recién creada."""
     sock = QLocalSocket()
-    sock.connectToServer(key)
+    sock.connectToServer(_INSTANCE_KEY)
     if sock.waitForConnected(200):
         sock.disconnectFromServer()
-        return None
-    QLocalServer.removeServer(key)
-    server = QLocalServer()
-    server.listen(key)
-    return server
+        return True
+    return False
 
 
 def main():
+    if already_running():
+        print("⚠️ Screenshot Tool ya está corriendo.")
+        return
+
     # Qt exige el hilo principal en X11: un QApplication en worker thread
     # nunca recibe input (verificado). Todo el UI vive en este módulo igual.
     qapp = QApplication(sys.argv)
     qapp.setApplicationName("screenshot-tool")
     qapp.setQuitOnLastWindowClosed(False)
 
-    server = single_instance()
-    if server is None:
-        print("⚠️ Screenshot Tool ya está corriendo.")
-        sys.exit(0)
+    QLocalServer.removeServer(_INSTANCE_KEY)   # socket stale de un crash
+    server = QLocalServer()
+    server.listen(_INSTANCE_KEY)
     qapp._single_instance_server = server   # mantener vivo el lock
 
     app = ScreenshotApp(qapp)

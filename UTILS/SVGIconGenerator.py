@@ -4,13 +4,15 @@
 Uso:
     python3 UTILS/SVGIconGenerator.py [ruta_salida.svg]
 
-Si no se pasa ruta, escribe icon.svg junto a este script (../icon.svg).
+Si no se pasa ruta, escribe el icono en su ubicación persistente
+(~/.config/screenshot-tool/icon.svg), de donde la app lo carga al arrancar.
 Opcionalmente, si PyQt6 está disponible, exporta también PNGs en varios
 tamaños (16/24/32/48/64/128) a UTILS/png/.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -72,15 +74,32 @@ SVG_TEMPLATE = """\
 """
 
 PALETTE = {
-    "bg_top":   "#8b5cf6",   # violeta
-    "bg_mid":   "#6366f1",   # índigo
-    "bg_bot":   "#0ea5e9",   # celeste
-    "lens_top": "#67e8f9",   # cian claro
-    "lens_bot": "#4f46e5",   # índigo
-    "flash":    "#fbbf24",   # ámbar
+    "bg_top":   "#a78bfa",   # violeta claro
+    "bg_mid":   "#8b5cf6",   # violeta
+    "bg_bot":   "#6d28d9",   # violeta profundo
+    "lens_top": "#ddd6fe",   # lavanda
+    "lens_bot": "#7c3aed",   # violeta
+    "flash":    "#f0abfc",   # fucsia suave
 }
 
 PNG_SIZES = (16, 24, 32, 48, 64, 128)
+
+# Ubicación persistente del icono: la app lo carga de acá al arrancar.
+ICON_PATH = (Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+             / "screenshot-tool" / "icon.svg")
+
+
+def ensure_saved_icon(force: bool = False) -> Path | None:
+    """Garantiza que el icono persista en ICON_PATH y devuelve la ruta.
+
+    Si ya existe (y no se fuerza), no lo regenera: así un icono generado a
+    mano sobrevive a los reinicios de la app. Devuelve None si falla."""
+    try:
+        if force or not ICON_PATH.exists():
+            write_svg(ICON_PATH)
+        return ICON_PATH
+    except OSError:
+        return None
 
 
 def build_svg(palette: dict[str, str] | None = None) -> str:
@@ -133,7 +152,7 @@ def export_pngs(svg_path: Path, out_dir: Path, sizes: tuple[int, ...] = PNG_SIZE
 
 def main(argv: list[str]) -> int:
     here = Path(__file__).resolve().parent
-    out = Path(argv[1]) if len(argv) > 1 else here.parent / "icon.svg"
+    out = Path(argv[1]) if len(argv) > 1 else ICON_PATH
     svg = write_svg(out)
     print(f"SVG generado: {svg}")
 
