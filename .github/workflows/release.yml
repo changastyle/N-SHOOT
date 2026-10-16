@@ -1,0 +1,85 @@
+# ============================================================================
+#  release.yml
+#  Al pushear a main/master, toma OUT/ (build local con el AppImage)
+#  y publica un Release con version (del nombre del archivo) + fecha.
+#  NO compila en cloud.
+#  El build local lo genera CI-CD-LOCAL/generate-appimage.sh
+# ============================================================================
+
+name: Release
+
+# 1 - TRIGGER: al pushear a main o master
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 2 - CHECKOUT DEL CODIGO (OUT/ no esta en .gitignore):
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 3 - VERIFICAR QUE EXISTA OUT/*.AppImage:
+      - name: Verify OUT/*.AppImage exists
+        run: |
+          if ! ls OUT/screenshot-tool-*-*.AppImage >/dev/null 2>&1; then
+            echo "ERROR: No se encontro ningun OUT/screenshot-tool-*.AppImage"
+            echo "Hace el build local con CI-CD-LOCAL/generate-appimage.sh"
+            echo "y commitea la carpeta OUT/ completa"
+            exit 1
+          fi
+          echo "OK: AppImages encontrados"
+          ls -lh OUT/*.AppImage
+
+      # 4 - VERSION (del nombre del archivo) + FECHA DE HOY:
+      #     El nombre lo arma generate-appimage.sh:
+      #       screenshot-tool-<VERSION>-<ARCH>.AppImage
+      - name: Get version and date
+        id: meta
+        run: |
+          FILE=$(basename "$(ls OUT/screenshot-tool-*-*.AppImage | head -1)")
+          VERSION=$(echo "$FILE" | sed -E 's/^screenshot-tool-(.*)-[^-]+\.AppImage$/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "date=$(date +'%d-%m-%Y')" >> $GITHUB_OUTPUT
+          echo "Archivo: $FILE -> version $VERSION"
+
+      # 5 - CREAR EL RELEASE Y SUBIR EL/los AppImage:
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.date }}-r${{ github.run_number }}
+          name: "Screenshot Tool v${{ steps.meta.outputs.version }} - ${{ steps.meta.outputs.date }}"
+          body: |
+            ## Screenshot Tool v${{ steps.meta.outputs.version }} - Build ${{ steps.meta.outputs.date }}
+
+            Capturador de pantalla que vive en el tray. Presionas un atajo
+            (por defecto **F10**), la pantalla se congela, dibujas el area
+            y al soltar el mouse:
+
+            - Se guarda el crop como JPEG/PNG en tu carpeta
+            - Se copia al portapapeles
+            - Toast de confirmacion + preview flotante + sonido de obturador
+
+            ### Descarga
+            - **screenshot-tool-*.AppImage** — paquete autocontenido para
+              Linux x86_64 (todas las dependencias adentro, incluida
+              libxcb-cursor para el plugin xcb de Qt)
+
+            ### Como usar
+            1. Descargar el `.AppImage`, darle permisos de ejecucion
+               (`chmod +x`) y ejecutarlo con doble clic
+            2. En distros sin FUSE 2 (Ubuntu 22.04+): ejecutar con
+               `--appimage-extract-and-run`
+            3. Preferencias: clic derecho en el icono del tray
+          files: |
+            OUT/*.AppImage
+          draft: false
+          prerelease: false

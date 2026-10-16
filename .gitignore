@@ -1,0 +1,23 @@
+# Entorno virtual y caches de Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Artefactos intermedios del build de AppImage (el .AppImage final en OUT/
+# NO se ignora: release.yml lo publica tal cual, no compila en cloud).
+CI-CD-LOCAL/build/
+CI-CD-LOCAL/tools/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Entorno / logs locales
+.env
+*.log
