@@ -47,6 +47,21 @@ if ! command -v wget >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
 fi
 echo "      python3 $(python3 -V 2>&1 | awk '{print $2}') OK"
 
+# python3-venv: sin ensurepip el 'python3 -m venv' del paso 4 falla.
+if ! python3 -c "import ensurepip" 2>/dev/null; then
+    echo "      AVISO: falta python3-venv (ensurepip no disponible)."
+    if [ -t 0 ] && command -v apt-get >/dev/null 2>&1; then
+        echo "      Instalando python3-venv (apt pedira sudo)..."
+        sudo apt-get install -y python3-venv || {
+            echo "ERROR: instala manualmente: sudo apt install python3-venv"
+            exit 1
+        }
+    else
+        echo "ERROR: falta python3-venv (sudo apt install python3-venv)."
+        exit 1
+    fi
+fi
+
 # ----------------------------------------------------------------------------
 # 2 - VERSION Y FECHA DEL BUILD:
 # ----------------------------------------------------------------------------
@@ -120,6 +135,19 @@ cp "$BUILD/dist/$APP" "$APPDIR/usr/bin/$APP"
 XCB_CURSOR="$(ldconfig -p 2>/dev/null | awk '/libxcb-cursor\.so\.0/{print $NF; exit}')"
 if [ -z "$XCB_CURSOR" ] && [ -f "$HOME/.local/lib/screenshot-tool/libxcb-cursor.so.0" ]; then
     XCB_CURSOR="$HOME/.local/lib/screenshot-tool/libxcb-cursor.so.0"
+fi
+# Ultimo recurso: bajar el .deb con 'apt download' (no requiere root) y
+# extraer el .so, asi el AppImage queda autocontenido aunque el host de
+# build no tenga el paquete instalado.
+if [ -z "$XCB_CURSOR" ] && command -v apt >/dev/null 2>&1; then
+    echo "      libxcb-cursor no instalada; extrayendo .deb (sin sudo)..."
+    DEBDIR="$BUILD/debs"
+    rm -rf "$DEBDIR" && mkdir -p "$DEBDIR"
+    if (cd "$DEBDIR" && apt download libxcb-cursor0 >/dev/null 2>&1); then
+        DEB="$(find "$DEBDIR" -maxdepth 1 -name 'libxcb-cursor0_*.deb' | head -1)"
+        dpkg-deb -x "$DEB" "$DEBDIR/extract" 2>/dev/null || true
+        XCB_CURSOR="$(find "$DEBDIR/extract" -name 'libxcb-cursor.so.0*' | head -1)"
+    fi
 fi
 if [ -n "$XCB_CURSOR" ]; then
     cp -L "$XCB_CURSOR" "$APPDIR/usr/lib/libxcb-cursor.so.0"

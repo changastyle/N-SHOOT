@@ -9,9 +9,30 @@ la pantalla se congela, dibujás el área, y al soltar el mouse:
 
 ## Instalación
 
+No hay instalador: el **AppImage es autocontenido** (Python, Qt y
+`libxcb-cursor` ya vienen adentro).
+
 ```bash
-CI-CD-LOCAL/install.sh     # crea el venv, instala deps y configura autoarranque
-CI-CD-LOCAL/run.sh         # arranca (o reiniciá la sesión para autostart)
+./screenshot-tool-<version>-x86_64.AppImage   # doble clic también vale
+```
+
+La primera ejecución ya registra el **autoarranque** (se puede desactivar
+en Preferencias → Sistema). Si tu distro no tiene FUSE 2, ejecutala con
+`--appimage-extract-and-run`.
+
+Para generar el AppImage:
+
+```bash
+CI-CD-LOCAL/generate-appimage.sh [version]    # artefacto en OUT/
+```
+
+Modo desarrollo (opcional):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install $(grep -v pynput requirements.txt | tr '\n' ' ')
+.venv/bin/pip install --no-deps pynput   # evdev necesita python3-dev; prescindible
+.venv/bin/python screenshot_tray_linux.py
 ```
 
 ## Uso
@@ -43,8 +64,7 @@ Todo configurable por pestañas: **Captura** (atajo, detección de ventanas),
 |---|---|
 | `screenshot_tray_linux.py` | Programa principal |
 | `requirements.txt` | Dependencias |
-| `CI-CD-LOCAL/install.sh` | Instalación (venv + deps + autostart) |
-| `CI-CD-LOCAL/run.sh` | Lanzar manualmente |
+| `CI-CD-LOCAL/generate-appimage.sh` | Build del AppImage autocontenido |
 | `~/.config/screenshot-tool/config.json` | Config persistida |
 | `~/.config/autostart/screenshot-tool.desktop` | Autoarranque |
 | `~/.cache/screenshot-tool.log` | Log de errores en runtime |
@@ -56,3 +76,5 @@ Todo configurable por pestañas: **Captura** (atajo, detección de ventanas),
 - La pantalla se captura una vez al abrir el overlay (`mss`), así el recorte
   es exacto y **sin parpadeos ni re-capturas**.
 - **Instancia única**: si ya hay un proceso corriendo, no se duplica.
+- **Sin instalador**: el AppImage re-escribe su `.desktop` de autostart en
+  cada arranque (Exec apunta al AppImage real, no a paths temporales).

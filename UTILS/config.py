@@ -53,18 +53,26 @@ def save_config(cfg: dict) -> None:
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def set_autostart(enable: bool, entry_script: Path | None = None) -> None:
+def _exec_line() -> str:
+    """Comando Exec= para el .desktop segun cómo corre la app:
+    - AppImage/PyInstaller: el propio binario (env APPIMAGE si existe, que es
+      la ruta real del .AppImage; sys.executable apunta al mount temporal).
+    - Dev (.venv): python del venv + script, sin resolver el symlink
+      (resolve() llevaría a /usr/bin/python3.x, sin las dependencias)."""
+    if getattr(sys, "frozen", False):
+        exe = os.environ.get("APPIMAGE") or sys.executable
+        return str(Path(exe))
+    return f"{Path(sys.executable)} {_ENTRY_SCRIPT}"
+
+
+def set_autostart(enable: bool) -> None:
     try:
         if enable:
             AUTOSTART_PATH.parent.mkdir(parents=True, exist_ok=True)
-            script = Path(entry_script) if entry_script else _ENTRY_SCRIPT
-            # sys.executable ya apunta al python del venv; NO resolver el symlink
-            # (resolve() lleva a /usr/bin/python3.x, que no tiene las dependencias)
-            py = Path(sys.executable)
             AUTOSTART_PATH.write_text(
                 "[Desktop Entry]\n"
                 "Type=Application\n"
-                f"Exec={py} {script}\n"
+                f"Exec={_exec_line()}\n"
                 "Hidden=false\n"
                 "NoDisplay=false\n"
                 f"Name={APP_NAME}\n"

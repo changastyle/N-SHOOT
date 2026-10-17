@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """SVGIconGenerator — genera el icono SVG de la app de capturas.
 
+Es una silueta blanca minimalista de cámara, al estilo de los iconos
+monocromos del panel de Mint (escudo, wifi, volumen): vectorial, con
+curvas suaves y lente calado, se ve nítida en el tray a 16-24 px.
+
 Uso:
     python3 UTILS/SVGIconGenerator.py [ruta_salida.svg]
 
@@ -19,70 +23,23 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 # Definición del icono
 # --------------------------------------------------------------------------- #
+# Cámara en silueta maciza (se lee mejor a tamaño de tray que el outline):
+# cuerpo redondeado con visor y lente calado con pupila (anillo oscuro +
+# punto blanco, como la doble línea del escudo pero en relleno).
 SVG_TEMPLATE = """\
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="{bg_top}"/>
-      <stop offset=".5" stop-color="{bg_mid}"/>
-      <stop offset="1" stop-color="{bg_bot}"/>
-    </linearGradient>
-    <linearGradient id="lens" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="{lens_top}"/>
-      <stop offset="1" stop-color="{lens_bot}"/>
-    </linearGradient>
-    <radialGradient id="glint" cx=".35" cy=".3" r=".8">
-      <stop offset="0" stop-color="#ffffff" stop-opacity=".9"/>
-      <stop offset=".35" stop-color="#ffffff" stop-opacity=".12"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#0f172a" flood-opacity=".35"/>
-    </filter>
-  </defs>
-
-  <!-- fondo -->
-  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#bg)"/>
-
-  <!-- marcas de recorte (screenshot) -->
-  <g stroke="#ffffff" stroke-opacity=".55" stroke-width="2.5" stroke-linecap="round" fill="none">
-    <path d="M9 15v-3a3 3 0 0 1 3-3h3"/>
-    <path d="M49 9h3a3 3 0 0 1 3 3v3"/>
-    <path d="M55 49v3a3 3 0 0 1-3 3h-3"/>
-    <path d="M15 55h-3a3 3 0 0 1-3-3v-3"/>
-  </g>
-
-  <!-- cuerpo de cámara -->
-  <g filter="url(#soft)">
-    <path d="M24 15h16a3 3 0 0 1 3 3v3h-22v-3a3 3 0 0 1 3-3z" fill="#eef2ff"/>
-    <rect x="9" y="19" width="46" height="31" rx="7" fill="#f8fafc"/>
-  </g>
-
-  <!-- lente -->
-  <circle cx="32" cy="34.5" r="11.5" fill="#1e293b"/>
-  <circle cx="32" cy="34.5" r="9" fill="url(#lens)"/>
-  <circle cx="32" cy="34.5" r="4.5" fill="#0f172a"/>
-  <circle cx="32" cy="34.5" r="9" fill="url(#glint)"/>
-  <circle cx="27.5" cy="30" r="2" fill="#ffffff" fill-opacity=".85"/>
-
-  <!-- flash -->
-  <circle cx="48.5" cy="25.5" r="2" fill="{flash}"/>
-
-  <!-- destello -->
-  <path d="M50 42l1.2 3 3 1.2-3 1.2-1.2 3-1.2-3-3-1.2 3-1.2z" fill="#ffffff" fill-opacity=".9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- cuerpo + visor macizos; lente calado y pupila por fill-rule evenodd -->
+  <path fill="#ffffff" fill-rule="evenodd" d="M10.5 5.5h3q1.5 0 1.5 1.5v1h2.7q2.8 0 2.8 2.8v5.4q0 2.8-2.8 2.8h-11.4q-2.8 0-2.8-2.8v-5.4q0-2.8 2.8-2.8h2.7v-1q0-1.5 1.5-1.5Z M12 9.9a3.6 3.6 0 1 0 0 7.2a3.6 3.6 0 1 0 0-7.2Z M12 12.3a1.2 1.2 0 1 0 0 2.4a1.2 1.2 0 1 0 0-2.4Z"/>
 </svg>
 """
 
-PALETTE = {
-    "bg_top":   "#a78bfa",   # violeta claro
-    "bg_mid":   "#8b5cf6",   # violeta
-    "bg_bot":   "#6d28d9",   # violeta profundo
-    "lens_top": "#ddd6fe",   # lavanda
-    "lens_bot": "#7c3aed",   # violeta
-    "flash":    "#f0abfc",   # fucsia suave
-}
-
 PNG_SIZES = (16, 24, 32, 48, 64, 128)
+
+# Versión del diseño: ensure_saved_icon reescribe el icono persistido cuando
+# este stamp no coincide, para que un cambio de icono se vea en el próximo
+# arranque sin tener que borrar ~/.config/screenshot-tool/icon.svg a mano.
+ICON_VERSION = 10
+_STAMP = f"<!-- screenshot-tool icon v{ICON_VERSION} -->"
 
 # Ubicación persistente del icono: la app lo carga de acá al arrancar.
 ICON_PATH = (Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -92,28 +49,33 @@ ICON_PATH = (Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 def ensure_saved_icon(force: bool = False) -> Path | None:
     """Garantiza que el icono persista en ICON_PATH y devuelve la ruta.
 
-    Si ya existe (y no se fuerza), no lo regenera: así un icono generado a
-    mano sobrevive a los reinicios de la app. Devuelve None si falla."""
+    Reescribe el archivo si no existe o si el stamp de versión no coincide
+    (icono de un diseño anterior): así el icono nuevo carga desde el
+    arranque sin intervención manual. Devuelve None si falla."""
     try:
-        if force or not ICON_PATH.exists():
+        stale = True
+        if ICON_PATH.exists():
+            try:
+                with ICON_PATH.open(encoding="utf-8") as f:
+                    stale = f.readline().strip() != _STAMP
+            except OSError:
+                stale = True
+        if force or stale:
             write_svg(ICON_PATH)
         return ICON_PATH
     except OSError:
         return None
 
 
-def build_svg(palette: dict[str, str] | None = None) -> str:
+def build_svg() -> str:
     """Devuelve el contenido SVG del icono como string."""
-    colors = dict(PALETTE)
-    if palette:
-        colors.update(palette)
-    return SVG_TEMPLATE.format(**colors)
+    return f"{_STAMP}\n{SVG_TEMPLATE}"
 
 
-def write_svg(out_path: Path, palette: dict[str, str] | None = None) -> Path:
+def write_svg(out_path: Path) -> Path:
     """Escribe el SVG en out_path y devuelve la ruta."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(build_svg(palette), encoding="utf-8")
+    out_path.write_text(build_svg(), encoding="utf-8")
     return out_path
 
 

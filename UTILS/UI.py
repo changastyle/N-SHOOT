@@ -64,6 +64,12 @@ class ScreenshotApp(QObject):
         super().__init__()
         self.qapp = qapp
         self.cfg = load_config()
+        # Autoarranque sin instalador: re-escribir el .desktop en cada run
+        # (es un archivo de texto mínimo) mantiene el Exec= correcto aunque
+        # el binario/AppImage se mueva de carpeta o cambie de modo (venv →
+        # frozen). Si el usuario lo desactiva en Preferencias, no se crea.
+        if self.cfg.get("autostart"):
+            set_autostart(True)
         self._last_trigger = 0.0   # detección manual de doble clic (SNI)
         self._overlay = None
         self._frozen = None
@@ -379,8 +385,12 @@ def main():
 
     app = ScreenshotApp(qapp)
     hk = hotkey_display(app.cfg["hotkey"])
-    app.tray.showMessage(
-        APP_NAME,
-        f"Listo 📸\nAtajo actual: {hk or '(ninguno, configurá en Preferencias)'}",
-        QSystemTrayIcon.MessageIcon.Information, 4000)
+    msg = f"Listo 📸\nAtajo actual: {hk or '(ninguno, configurá en Preferencias)'}"
+    # Qt ≥ 6.6 permite pasar un QIcon: la notificación de arranque usa el
+    # icono de la app en vez del símbolo genérico de "información" (ⓘ).
+    try:
+        app.tray.showMessage(APP_NAME, msg, app.tray.icon(), 4000)
+    except TypeError:   # PyQt6 < 6.6: sólo acepta MessageIcon
+        app.tray.showMessage(APP_NAME, msg,
+                             QSystemTrayIcon.MessageIcon.Information, 4000)
     sys.exit(qapp.exec())
