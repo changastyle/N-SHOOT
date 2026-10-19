@@ -37,6 +37,7 @@ El código vive en UTILS/:
 """
 
 import sys
+import time
 from pathlib import Path
 
 # Poder hacer "import UTILS.xxx" sin depender del cwd:
@@ -64,7 +65,12 @@ except (ImportError, AssertionError) as e:
           "(Windows Security → App & browser control).")
     sys.exit(1)
 
-from UTILS.UI import main
+from UTILS.UI import already_running, main, send_quit
 
 if __name__ == "__main__":
+    if already_running():
+        # Relanzar = reemplazar: la instancia vieja (posiblemente con código
+        # anterior y adueñada del hotkey global) cede el lugar a esta.
+        send_quit()
+        time.sleep(0.6)   # esperar a que libere el lock y el hotkey
     main()

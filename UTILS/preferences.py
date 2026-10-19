@@ -181,6 +181,9 @@ class PreferencesDialog(QDialog):
         self.autostart = QCheckBox("Arrancar automáticamente al iniciar la sesión")
         self.autostart.setChecked(self.cfg["autostart"])
         f.addRow(self.autostart)
+        self.startup_notif = QCheckBox("Mostrar notificación al iniciar la app")
+        self.startup_notif.setChecked(self.cfg["startup_notification"])
+        f.addRow(self.startup_notif)
         info = QLabel("Ubicación de config:\n"
                       f"{CONFIG_FILE}")
         info.setWordWrap(True)
@@ -223,5 +226,6 @@ class PreferencesDialog(QDialog):
             "thirds_grid": self.thirds.isChecked(),
             "accent": getattr(self, "_accent_val", self.cfg["accent"]),
             "autostart": self.autostart.isChecked(),
+            "startup_notification": self.startup_notif.isChecked(),
         })
         return cfg

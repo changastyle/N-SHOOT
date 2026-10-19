@@ -3,19 +3,22 @@
 lupa, regla de tercios y detección de ventana bajo el cursor), más los
 widgets flotantes de feedback: Toast y FloatPreview."""
 
+from pathlib import Path
+
 from UTILS.qt_compat.QtCore import (QEasingCurve, QPoint, QPropertyAnimation,
                                     QRect, Qt, QTimer, pyqtSignal)
 from UTILS.qt_compat.QtGui import (QColor, QCursor, QFont, QImage, QPainter,
                                    QPen, QPixmap)
-from UTILS.qt_compat.QtWidgets import QApplication, QLabel, QWidget
+from UTILS.qt_compat.QtWidgets import QApplication, QLabel, QMenu, QWidget
 
 from UTILS.screen_capture import window_rect_at
 from UTILS.hotkeys import hotkey_display
+from UTILS.system import open_path
 
 
 class CaptureOverlay(QWidget):
     """Pantalla congelada a fullscreen: mirita, guías, lupa, regla de tercios."""
-    done = pyqtSignal(QRect)      # rect en coords del widget
+    done = pyqtSignal(QRect, str)  # rect en coords del widget + título de ventana (si aplica)
     canceled = pyqtSignal()
 
     def __init__(self, frozen: QImage, img_origin: QPoint, cfg: dict):
@@ -102,7 +105,11 @@ class CaptureOverlay(QWidget):
             # arrastre demasiado chico → lo ignoramos, puede seguir seleccionando
             self.update()
             return
-        self.done.emit(r)
+        # ventana topmost bajo el cursor al soltar → su título pasa al nombre
+        # de archivo (mismo criterio que el highlight amarillo)
+        o = self._virt_origin()
+        res = window_rect_at(self._cur.x() + o.x(), self._cur.y() + o.y())
+        self.done.emit(r, res[1] if res else "")
         self.close()
 
     def closeEvent(self, e):
@@ -122,12 +129,25 @@ class CaptureOverlay(QWidget):
 
     def confirm(self):
         """Confirma la captura como si se hubiera presionado Enter:
-        si hay una ventana resaltada (y no se está arrastrando), la captura.
+        captura la ventana bajo el cursor (si no se está arrastrando).
         También lo llama la UI cuando el hotkey global se dispara de nuevo
-        con el overlay abierto (F10 de nuevo = Enter)."""
-        if self._origin is None and self._hover_win:
-            self.done.emit(self._hover_win)
-            self.close()
+        con el overlay abierto (F10 de nuevo = Enter).
+
+        Hace una consulta fresca a window_rect_at: la cache del timer
+        (_hover_win) puede estar vencida o ni existir si window_hover
+        está desactivado."""
+        if self._origin is not None:
+            return
+        o = self._virt_origin()
+        res = window_rect_at(self._cur.x() + o.x(), self._cur.y() + o.y())
+        if res:
+            self.done.emit(self._to_widget(res[0]), res[1] or "")
+        elif self._hover_win:
+            # fallback: última ventana detectada por el timer
+            self.done.emit(self._hover_win, self._hover_name)
+        else:
+            return
+        self.close()
 
     def _detect_window(self):
         if self._origin is not None or not self.cfg.get("window_hover", True):
@@ -146,24 +166,22 @@ class CaptureOverlay(QWidget):
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         full = self.rect()
         p.drawImage(full, self.frozen)
-        p.fillRect(full, QColor(0, 0, 0, 110))          # oscurecer todo
+        # estilo Greenshot: NO se oscurece la pantalla; solo se tinta la selección
 
         sel = self._sel()
         dragging = self._origin is not None
 
         if not sel.isNull():
             sel = sel.intersected(full)
-            # "reiluminar" el área seleccionada
-            src = self._to_img(sel)
-            p.drawImage(sel, self.frozen, src)
-            # borde
-            p.setPen(QPen(QColor(0, 0, 0, 160), 4))
-            p.drawRect(sel)
+            # tint verde translúcido + borde del color de acento
+            tint = QColor(self._accent)
+            tint.setAlpha(50)
+            p.fillRect(sel, tint)
             p.setPen(QPen(self._accent, 2))
             p.drawRect(sel)
-            # regla de tercios
+            # regla de tercios (líneas oscuras: la zona ya está tintada clara)
             if self.cfg.get("thirds_grid", True):
-                pen = QPen(QColor(255, 255, 255, 90), 1, Qt.PenStyle.DashLine)
+                pen = QPen(QColor(0, 0, 0, 110), 1, Qt.PenStyle.DashLine)
                 p.setPen(pen)
                 for fx in (1 / 3, 2 / 3):
                     x = sel.x() + int(sel.width() * fx)
@@ -171,9 +189,9 @@ class CaptureOverlay(QWidget):
                 for fy in (1 / 3, 2 / 3):
                     y = sel.y() + int(sel.height() * fy)
                     p.drawLine(sel.x(), y, sel.right(), y)
-            # handles
+            # handles con el color de acento
             p.setPen(QPen(QColor(0, 0, 0), 1))
-            p.setBrush(QColor(255, 255, 255))
+            p.setBrush(self._accent)
             hs = 8
             hpts = [sel.topLeft(), QPoint(sel.center().x(), sel.top()),
                     sel.topRight(), QPoint(sel.left(), sel.center().y()),
@@ -181,9 +199,23 @@ class CaptureOverlay(QWidget):
                     QPoint(sel.center().x(), sel.bottom()), sel.bottomRight()]
             for hp in hpts:
                 p.drawRect(hp.x() - hs // 2, hp.y() - hs // 2, hs, hs)
-            # etiqueta W×H
+            # dimensiones: texto verde adentro, abajo a la derecha (estilo Greenshot)
             label = f"{sel.width()} × {sel.height()}"
-            self._label(p, label, sel.topLeft(), above=True)
+            f = QFont()
+            f.setBold(True)
+            f.setPointSize(12)
+            p.setFont(f)
+            fm = p.fontMetrics()
+            lx = sel.right() - fm.horizontalAdvance(label) - 8
+            ly = sel.bottom() - 8
+            if sel.width() < fm.horizontalAdvance(label) + 20:
+                lx = sel.right() + 6              # rect muy angosto → afuera
+                ly = sel.bottom()
+            dark = QColor(self._accent).darker(160)
+            p.setPen(QColor(255, 255, 255, 170))
+            p.drawText(lx + 1, ly + 1, label)     # sombra clara para legibilidad
+            p.setPen(dark)
+            p.drawText(lx, ly, label)
 
         # ventana resaltada (modo sin drag)
         if not dragging and self._hover_win:
@@ -193,11 +225,12 @@ class CaptureOverlay(QWidget):
             if self._hover_name:
                 self._label(p, self._hover_name, self._hover_win.topLeft(), filechip=True)
 
-        # cursillete (crosshair) + lupa cuando no estás arrastrando
+        # crosshair negro grueso estilo Greenshot (halo claro para fondos oscuros)
         if not dragging:
-            pen = QPen(QColor(255, 255, 255, 140), 1)
-            pen.setStyle(Qt.PenStyle.DashLine)
-            p.setPen(pen)
+            p.setPen(QPen(QColor(255, 255, 255, 130), 5))
+            p.drawLine(0, self._cur.y(), full.width(), self._cur.y())
+            p.drawLine(self._cur.x(), 0, self._cur.x(), full.height())
+            p.setPen(QPen(QColor(0, 0, 0, 235), 3))
             p.drawLine(0, self._cur.y(), full.width(), self._cur.y())
             p.drawLine(self._cur.x(), 0, self._cur.x(), full.height())
             if self.cfg.get("magnifier", True):
@@ -316,15 +349,22 @@ class Toast(QLabel):
 
 
 class FloatPreview(QWidget):
-    """Miniatura flotante de la captura que se desvanece tras N segundos."""
+    """Miniatura flotante de la captura que se desvanece tras N segundos.
 
-    def __init__(self, pix: QPixmap, seconds: float, anchor: QRect | None):
+    Interactiva: clic izquierdo abre el archivo en el visor de fotos,
+    clic derecho muestra un menú (abrir, carpeta, copiar imagen, cerrar)
+    y pasar el mouse por encima pausa el desvanecimiento."""
+
+    def __init__(self, pix: QPixmap, seconds: float, anchor: QRect | None,
+                 path=None):
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint |
                             Qt.WindowType.WindowStaysOnTopHint |
                             Qt.WindowType.X11BypassWindowManagerHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(260, 190)
+        self._path = Path(path) if path else None
+        self._full = pix          # imagen completa (para copiar al portapapeles)
         self._pix = pix.scaled(240, 150, Qt.AspectRatioMode.KeepAspectRatio,
                                Qt.TransformationMode.SmoothTransformation)
         lab = QLabel(self)
@@ -332,6 +372,12 @@ class FloatPreview(QWidget):
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lab.setGeometry(10, 10, 240, 150)
         lab.setStyleSheet("background:transparent;")
+        hint = QLabel("clic: abrir  -  clic der: opciones", self)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setGeometry(10, 164, 240, 16)
+        hint.setStyleSheet("color:#e5e7eb;font-size:10px;font-weight:bold;"
+                           "background:rgba(17,24,39,190);border-radius:6px;")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         ag = QApplication.primaryScreen().availableGeometry()
         x = ag.right() - self.width() - 24
         y = ag.bottom() - self.height() - 24
@@ -346,5 +392,51 @@ class FloatPreview(QWidget):
         self._anim.setStartValue(1.0)
         self._anim.setEndValue(0.0)
         self._anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        QTimer.singleShot(int(seconds * 1000), self._anim.start)
+        # Timer como miembro: enterEvent lo pausa, leaveEvent lo reanuda.
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._anim.start)
+        self._timer.start(int(seconds * 1000))
         self._anim.finished.connect(self.close)
+
+    def enterEvent(self, e):
+        # Pausar el fade mientras el mouse está encima del preview.
+        self._timer.stop()
+        self._anim.stop()
+        self.setWindowOpacity(1.0)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._timer.start(1200)   # margen extra antes de seguir desvaneciendo
+        super().leaveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            if self._path:
+                open_path(self._path)
+            self.close()
+        elif e.button() == Qt.MouseButton.RightButton:
+            self._menu(e.globalPosition().toPoint())
+        else:
+            super().mousePressEvent(e)
+
+    def _menu(self, global_pos: QPoint):
+        m = QMenu(self)
+        a_open = m.addAction("🖼  Abrir en el visor")
+        a_dir = m.addAction("📁  Abrir carpeta")
+        a_copy = m.addAction("📋  Copiar imagen")
+        m.addSeparator()
+        a_close = m.addAction("✖  Cerrar")
+        a_open.setEnabled(self._path is not None)
+        a_dir.setEnabled(self._path is not None)
+        act = m.exec(global_pos)
+        if act is a_open and self._path:
+            open_path(self._path)
+            self.close()
+        elif act is a_dir and self._path:
+            open_path(self._path.parent)
+            self.close()
+        elif act is a_copy:
+            QApplication.clipboard().setImage(self._full.toImage())
+        elif act is a_close:
+            self.close()

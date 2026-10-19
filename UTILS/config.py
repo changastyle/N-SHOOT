@@ -29,10 +29,11 @@ DEFAULTS = {
     "magnifier":      False,            # lupa alrededor del cursor
     "magnifier_zoom": 5,
     "thirds_grid":    True,
-    "accent":         "#00c8ff",
+    "accent":         "#00b050",
     "open_after":     "none",           # none | default | custom
     "editor_cmd":     "",               # comando con %f (ej: "gimp %f")
     "autostart":      True,
+    "startup_notification": True,       # notificación "Listo" al arrancar
 }
 
 # El .desktop apunta al entry point del proyecto (no a este archivo UTILS/).

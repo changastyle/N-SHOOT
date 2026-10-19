@@ -2,16 +2,18 @@
 """UI de Screenshot Tool: ícono en el tray, coordinación de capturas
 (selección / pantalla completa), guardado y preferencias.
 
-Todo el stack Qt (QApplication, tray, overlays, diálogos) vive acá y corre
+ el stack Qt (QApplication, tray, overlays, diálogos) vive acá y corre
 en el hilo PRINCIPAL. En Qt6/xcb un QApplication creado en un hilo
 secundario mapea ventanas y corre timers pero jamás despacha eventos de
 input (mouse/teclado) — el overlay se congela al primer click.
 El hotkey global sí corre en su propio hilo (XGrabListener, hotkeys.py).
 """
 
+import re
 import subprocess
 import sys
 import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +25,7 @@ from UTILS.qt_compat.QtNetwork import QLocalServer, QLocalSocket
 from UTILS.qt_compat.QtWidgets import (QApplication, QMenu, QMessageBox,
                                        QSystemTrayIcon, QWidget)
 
-from UTILS.screen_capture import grab_screen, play_shutter
+from UTILS.screen_capture import grab_screen, play_shutter, window_rect_at
 from UTILS.config import (APP_NAME, autostart_enabled, load_config,
                           save_config, set_autostart)
 from UTILS.system import open_path
@@ -31,6 +33,18 @@ from UTILS.deps import HAS_MSS, HAS_PYNPUT, HAS_XLIB
 from UTILS.hotkeys import HotkeyManager, hotkey_display
 from UTILS.overlay import CaptureOverlay, FloatPreview, Toast
 from UTILS.preferences import PreferencesDialog
+
+
+def _slug(text: str, limit: int = 8) -> str:
+    """Título de ventana → fragmento seguro para nombre de archivo.
+
+    Quita acentos y la ñ (NFKD→ASCII), deja solo [a-z0-9-], los espacios
+    y demás separadores pasan a guiones, y se recorta a `limit` chars.
+    Ej: 'Navegación - Google Chrome' → 'navegaci'."""
+    norm = unicodedata.normalize("NFKD", text)
+    ascii_ = norm.encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_.lower()).strip("-")
+    return slug[:limit].strip("-")
 
 
 def _icon_from_svg(svg_text: str) -> QIcon:
@@ -237,14 +251,15 @@ class ScreenshotApp(QObject):
         virt = QApplication.primaryScreen().virtualGeometry()
         r = QRect(0, 0, self._frozen.width(), self._frozen.height())
         img = self._frozen.copy(r)
-        self._save(img, QRect(virt))
+        res = window_rect_at(QCursor.pos().x(), QCursor.pos().y())
+        self._save(img, QRect(virt), res[1] if res else "")
         self._reset_capture()
 
-    def _on_sel_done(self, r: QRect):
+    def _on_sel_done(self, r: QRect, win: str = ""):
         img_rect = self._img_from_widget(r)
         img = self._frozen.copy(img_rect)
         virt = QApplication.primaryScreen().virtualGeometry()
-        self._save(img, virt)
+        self._save(img, virt, win)
         self._reset_capture()
 
     def _img_from_widget(self, r: QRect) -> QRect:
@@ -255,7 +270,8 @@ class ScreenshotApp(QObject):
                      int(r.width() * sx), int(r.height() * sy))
 
     # ----------------------------------------------------------- guardado
-    def _save(self, img: QImage, sel_widget_rect: QRect | None = None):
+    def _save(self, img: QImage, sel_widget_rect: QRect | None = None,
+              win: str = ""):
         folder = Path(self.cfg["save_folder"])
         try:
             folder.mkdir(parents=True, exist_ok=True)
@@ -265,6 +281,9 @@ class ScreenshotApp(QObject):
             return
         fmts = ["jpg", "png"] if self.cfg["format"] == "both" else [self.cfg["format"]]
         base = f"{self.cfg['prefix']}{datetime.now():%d-%m-%Y-%H-%M-%S}"
+        slug = _slug(win)          # título de la ventana capturada (si aplica)
+        if slug:
+            base += f"--{slug}"
         paths = []
         for f in fmts:
             path = folder / f"{base}.{f}"
@@ -288,7 +307,8 @@ class ScreenshotApp(QObject):
             QTimer.singleShot(60, lambda: self._popup(Toast(text, sel_widget_rect)))
         if self.cfg["float_preview"]:
             QTimer.singleShot(80, lambda: self._popup(FloatPreview(
-                QPixmap.fromImage(img), self.cfg["preview_seconds"], sel_widget_rect)))
+                QPixmap.fromImage(img), self.cfg["preview_seconds"], sel_widget_rect,
+                target)))
         # abrir después
         oa = self.cfg["open_after"]
         if oa == "default":
@@ -369,6 +389,23 @@ def already_running() -> bool:
     return False
 
 
+def send_quit() -> bool:
+    """Pide a la instancia en ejecución que cierre (relanzar = reemplazar).
+
+    Si una instancia vieja quedó corriendo con código anterior y adueñada
+    del hotkey global, una instancia nueva jamás recibiría el F10: el lock
+    solo se usaba como marca, nada mataba a la vieja. Esto la cierra por IPC."""
+    sock = QLocalSocket()
+    sock.connectToServer(_INSTANCE_KEY)
+    if not sock.waitForConnected(300):
+        return False
+    sock.write(b"quit")
+    sock.flush()
+    sock.waitForBytesWritten(300)
+    sock.disconnectFromServer()
+    return True
+
+
 def main():
     if already_running():
         print("⚠️ Screenshot Tool ya está corriendo.")
@@ -386,13 +423,14 @@ def main():
     qapp._single_instance_server = server   # mantener vivo el lock
 
     app = ScreenshotApp(qapp)
-    hk = hotkey_display(app.cfg["hotkey"])
-    msg = f"Listo 📸\nAtajo actual: {hk or '(ninguno, configurá en Preferencias)'}"
-    # Qt ≥ 6.6 permite pasar un QIcon: la notificación de arranque usa el
-    # icono de la app en vez del símbolo genérico de "información" (ⓘ).
-    try:
-        app.tray.showMessage(APP_NAME, msg, app.tray.icon(), 4000)
-    except TypeError:   # Qt < 6.6: sólo acepta MessageIcon
-        app.tray.showMessage(APP_NAME, msg,
-                             QSystemTrayIcon.MessageIcon.Information, 4000)
+    if app.cfg.get("startup_notification", True):
+        hk = hotkey_display(app.cfg["hotkey"])
+        msg = f"Listo 📸\nAtajo actual: {hk or '(ninguno, configurá en Preferencias)'}"
+        # Qt ≥ 6.6 permite pasar un QIcon: la notificación de arranque usa el
+        # icono de la app en vez del símbolo genérico de "información" (ⓘ).
+        try:
+            app.tray.showMessage(APP_NAME, msg, app.tray.icon(), 4000)
+        except TypeError:   # Qt < 6.6: sólo acepta MessageIcon
+            app.tray.showMessage(APP_NAME, msg,
+                                 QSystemTrayIcon.MessageIcon.Information, 4000)
     sys.exit(qapp.exec())
