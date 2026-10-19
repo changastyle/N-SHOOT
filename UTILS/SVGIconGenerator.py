@@ -85,9 +85,9 @@ def write_svg(out_path: Path) -> Path:
 def export_pngs(svg_path: Path, out_dir: Path, sizes: tuple[int, ...] = PNG_SIZES) -> list[Path]:
     """Renderiza el SVG a PNG en varios tamaños. Devuelve las rutas creadas."""
     try:
-        from PyQt6.QtCore import QSize
-        from PyQt6.QtGui import QIcon, QImage, QPainter, Qt
-        from PyQt6.QtSvg import QSvgRenderer
+        from UTILS.qt_compat.QtCore import QSize
+        from UTILS.qt_compat.QtGui import QIcon, QImage, QPainter, Qt
+        from UTILS.qt_compat.QtSvg import QSvgRenderer
     except ImportError:
         print("PyQt6 no disponible: se omite la exportación a PNG.")
         return []

@@ -1,4 +1,8 @@
-PyQt6>=6.6
+# Binding Qt: qt_compat usa PyQt6 si carga y cae a PySide6. En Windows con
+# Smart App Control las DLLs de PyQt6 pueden estar bloqueadas → PySide6.
+PyQt6>=6.6; sys_platform != "win32"
+PySide6>=6.6; sys_platform == "win32"
 mss>=9.0
 pynput>=1.7
-python-xlib>=0.33
+python-xlib>=0.33; sys_platform == "linux"
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"

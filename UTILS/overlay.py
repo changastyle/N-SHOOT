@@ -3,13 +3,14 @@
 lupa, regla de tercios y detección de ventana bajo el cursor), más los
 widgets flotantes de feedback: Toast y FloatPreview."""
 
-from PyQt6.QtCore import (QEasingCurve, QPoint, QPropertyAnimation, QRect,
-                          Qt, QTimer, pyqtSignal)
-from PyQt6.QtGui import (QColor, QCursor, QFont, QImage, QPainter, QPen,
-                         QPixmap)
-from PyQt6.QtWidgets import QApplication, QLabel, QWidget
+from UTILS.qt_compat.QtCore import (QEasingCurve, QPoint, QPropertyAnimation,
+                                    QRect, Qt, QTimer, pyqtSignal)
+from UTILS.qt_compat.QtGui import (QColor, QCursor, QFont, QImage, QPainter,
+                                   QPen, QPixmap)
+from UTILS.qt_compat.QtWidgets import QApplication, QLabel, QWidget
 
-from UTILS.capture import window_rect_at
+from UTILS.screen_capture import window_rect_at
+from UTILS.hotkeys import hotkey_display
 
 
 class CaptureOverlay(QWidget):
@@ -116,10 +117,17 @@ class CaptureOverlay(QWidget):
         if e.key() == Qt.Key.Key_Escape:
             self.canceled.emit()
             self.close()
-        elif e.key() == Qt.Key.Key_Return or e.key() == Qt.Key.Key_Enter:
-            if self._hover_win and not self._origin:
-                self.done.emit(self._hover_win)
-                self.close()
+        elif e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.confirm()
+
+    def confirm(self):
+        """Confirma la captura como si se hubiera presionado Enter:
+        si hay una ventana resaltada (y no se está arrastrando), la captura.
+        También lo llama la UI cuando el hotkey global se dispara de nuevo
+        con el overlay abierto (F10 de nuevo = Enter)."""
+        if self._origin is None and self._hover_win:
+            self.done.emit(self._hover_win)
+            self.close()
 
     def _detect_window(self):
         if self._origin is not None or not self.cfg.get("window_hover", True):
@@ -192,9 +200,10 @@ class CaptureOverlay(QWidget):
             p.setPen(pen)
             p.drawLine(0, self._cur.y(), full.width(), self._cur.y())
             p.drawLine(self._cur.x(), 0, self._cur.x(), full.height())
-            self._draw_magnifier(p)
+            if self.cfg.get("magnifier", True):
+                self._draw_magnifier(p)
             self._draw_hint(p)
-        else:
+        elif self.cfg.get("magnifier", True):
             self._draw_magnifier(p)
 
         p.end()
@@ -258,7 +267,9 @@ class CaptureOverlay(QWidget):
         lines = []
         if self.cfg.get("window_hover", True):
             lines.append("🖱️  Clic y arrastrá para seleccionar un área")
-            lines.append("📐  Enter → capturar la ventana señalada")
+            hk = hotkey_display(self.cfg.get("hotkey") or "")
+            confirm = f"Enter / {hk}" if hk else "Enter"
+            lines.append(f"📐  {confirm} → capturar la ventana señalada")
         else:
             lines.append("🖱️  Clic y arrastrá para seleccionar un área")
         lines.append("⎋  ESC o clic derecho para cancelar")

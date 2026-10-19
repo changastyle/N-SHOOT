@@ -30,3 +30,11 @@ try:
 except Exception:
     pkb = None
     HAS_PYNPUT = False
+
+# macOS: detección de ventana bajo el cursor (CGWindowListCopyWindowInfo)
+try:
+    import Quartz
+    HAS_QUARTZ = True
+except Exception:
+    Quartz = None
+    HAS_QUARTZ = False

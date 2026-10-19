@@ -32,7 +32,7 @@ Modo desarrollo (opcional):
 python3 -m venv .venv
 .venv/bin/pip install $(grep -v pynput requirements.txt | tr '\n' ' ')
 .venv/bin/pip install --no-deps pynput   # evdev necesita python3-dev; prescindible
-.venv/bin/python screenshot_tray_linux.py
+.venv/bin/python N-SHOOT.py
 ```
 
 ## Uso
@@ -62,7 +62,7 @@ Todo configurable por pestañas: **Captura** (atajo, detección de ventanas),
 
 | Archivo | Descripción |
 |---|---|
-| `screenshot_tray_linux.py` | Programa principal |
+| `N-SHOOT.py` | Programa principal |
 | `requirements.txt` | Dependencias |
 | `CI-CD-LOCAL/generate-appimage.sh` | Build del AppImage autocontenido |
 | `~/.config/screenshot-tool/config.json` | Config persistida |

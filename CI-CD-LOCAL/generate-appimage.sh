@@ -82,9 +82,9 @@ esac
 echo
 echo "[3/6] Cerrando instancias previas y limpiando..."
 
-# Solo matar instancias reales de la app (python .../screenshot_tray_linux.py);
+# Solo matar instancias reales de la app (python .../N-SHOOT.py);
 # un pkill -f generico tambien matchearia este mismo script/pyinstaller.
-pkill -f "python.*screenshot_(tool|tray_linux)\.py" 2>/dev/null && sleep 1 || true
+pkill -f "python.*N-SHOOT\.py" 2>/dev/null && sleep 1 || true
 pkill -f "$APP\.AppDir/usr/bin/$APP" 2>/dev/null || true
 
 rm -rf "$APPDIR" "$BUILD/dist" "$BUILD/work"
@@ -114,7 +114,7 @@ fi
     --name "$APP" \
     --hidden-import=Xlib --hidden-import=pynput \
     --distpath "$BUILD/dist" --workpath "$BUILD/work" --specpath "$BUILD" \
-    screenshot_tray_linux.py
+    N-SHOOT.py
 
 echo
 echo "      Compilacion exitosa!"

@@ -15,17 +15,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import (QByteArray, QObject, QPoint, QRect, QRectF, Qt,
-                          QTimer)
-from PyQt6.QtGui import (QAction, QColor, QCursor, QIcon, QImage, QPainter,
-                         QPen, QPixmap)
-from PyQt6.QtNetwork import QLocalServer, QLocalSocket
-from PyQt6.QtWidgets import (QApplication, QMenu, QMessageBox,
-                             QSystemTrayIcon, QWidget)
+from UTILS.qt_compat.QtCore import (QByteArray, QObject, QPoint, QRect,
+                                    QRectF, Qt, QTimer)
+from UTILS.qt_compat.QtGui import (QAction, QColor, QCursor, QIcon, QImage,
+                                   QPainter, QPen, QPixmap)
+from UTILS.qt_compat.QtNetwork import QLocalServer, QLocalSocket
+from UTILS.qt_compat.QtWidgets import (QApplication, QMenu, QMessageBox,
+                                       QSystemTrayIcon, QWidget)
 
-from UTILS.capture import grab_screen, play_shutter
+from UTILS.screen_capture import grab_screen, play_shutter
 from UTILS.config import (APP_NAME, autostart_enabled, load_config,
                           save_config, set_autostart)
+from UTILS.system import open_path
 from UTILS.deps import HAS_MSS, HAS_PYNPUT, HAS_XLIB
 from UTILS.hotkeys import HotkeyManager, hotkey_display
 from UTILS.overlay import CaptureOverlay, FloatPreview, Toast
@@ -40,7 +41,7 @@ def _icon_from_svg(svg_text: str) -> QIcon:
     quedar vacío y mostrarse invisible. Pixmaps rasterizados garantizan
     un ícono visible."""
     try:
-        from PyQt6.QtSvg import QSvgRenderer
+        from UTILS.qt_compat.QtSvg import QSvgRenderer
     except ImportError:
         return QIcon()
     renderer = QSvgRenderer(QByteArray(svg_text.encode("utf-8")))
@@ -219,7 +220,10 @@ class ScreenshotApp(QObject):
 
     def capture_selected(self):
         if self._overlay:
-            return     # ya hay una captura en curso
+            # Hotkey otra vez con el overlay abierto = Enter: captura la
+            # ventana resaltada en amarillo (sin ventana → no hace nada).
+            self._overlay.confirm()
+            return
         if not self._ensure_grab():
             return
         self._overlay = CaptureOverlay(self._frozen, self._img_origin, self.cfg)
@@ -260,7 +264,7 @@ class ScreenshotApp(QObject):
                                   QSystemTrayIcon.MessageIcon.Critical, 5000)
             return
         fmts = ["jpg", "png"] if self.cfg["format"] == "both" else [self.cfg["format"]]
-        base = f"{self.cfg['prefix']}{datetime.now():%Y%m%d_%H%M%S}"
+        base = f"{self.cfg['prefix']}{datetime.now():%d-%m-%Y-%H-%M-%S}"
         paths = []
         for f in fmts:
             path = folder / f"{base}.{f}"
@@ -288,8 +292,7 @@ class ScreenshotApp(QObject):
         # abrir después
         oa = self.cfg["open_after"]
         if oa == "default":
-            subprocess.Popen(["xdg-open", str(target)],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            open_path(target)
         elif oa == "custom" and self.cfg["editor_cmd"]:
             cmd = self.cfg["editor_cmd"].replace("%f", str(target))
             subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL,
@@ -326,8 +329,7 @@ class ScreenshotApp(QObject):
     def _open_folder(self):
         f = Path(self.cfg["save_folder"])
         f.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(["xdg-open", str(f)],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        open_path(f)
 
     def _toggle_autostart(self, on: bool):
         set_autostart(on)
@@ -390,7 +392,7 @@ def main():
     # icono de la app en vez del símbolo genérico de "información" (ⓘ).
     try:
         app.tray.showMessage(APP_NAME, msg, app.tray.icon(), 4000)
-    except TypeError:   # PyQt6 < 6.6: sólo acepta MessageIcon
+    except TypeError:   # Qt < 6.6: sólo acepta MessageIcon
         app.tray.showMessage(APP_NAME, msg,
                              QSystemTrayIcon.MessageIcon.Information, 4000)
     sys.exit(qapp.exec())

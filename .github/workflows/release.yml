@@ -1,9 +1,10 @@
 # ============================================================================
 #  release.yml
-#  Al pushear a main/master, toma OUT/ (build local con el AppImage)
+#  Al pushear a main/master, toma OUT/ (builds locales: AppImage y/o exe)
 #  y publica un Release con version (del nombre del archivo) + fecha.
 #  NO compila en cloud.
-#  El build local lo genera CI-CD-LOCAL/generate-appimage.sh
+#  Builds locales: CI-CD-LOCAL/generate-appimage.sh  (Linux → .AppImage)
+#                  CI-CD-LOCAL/generate-exe.ps1      (Windows → .exe)
 # ============================================================================
 
 name: Release
@@ -27,26 +28,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 3 - VERIFICAR QUE EXISTA OUT/*.AppImage:
-      - name: Verify OUT/*.AppImage exists
+      # 3 - VERIFICAR QUE EXISTA ALGUN ARTEFACTO EN OUT/:
+      - name: Verify OUT/ artifacts exist
         run: |
-          if ! ls OUT/screenshot-tool-*-*.AppImage >/dev/null 2>&1; then
-            echo "ERROR: No se encontro ningun OUT/screenshot-tool-*.AppImage"
+          if ! ls OUT/screenshot-tool-*-*.AppImage OUT/screenshot-tool-*-*.exe >/dev/null 2>&1; then
+            echo "ERROR: No se encontro ningun artefacto OUT/screenshot-tool-*"
             echo "Hace el build local con CI-CD-LOCAL/generate-appimage.sh"
+            echo "(Linux) o CI-CD-LOCAL/generate-exe.ps1 (Windows)"
             echo "y commitea la carpeta OUT/ completa"
             exit 1
           fi
-          echo "OK: AppImages encontrados"
-          ls -lh OUT/*.AppImage
+          echo "OK: artefactos encontrados"
+          ls -lh OUT/*.AppImage OUT/*.exe 2>/dev/null || true
 
       # 4 - VERSION (del nombre del archivo) + FECHA DE HOY:
-      #     El nombre lo arma generate-appimage.sh:
-      #       screenshot-tool-<VERSION>-<ARCH>.AppImage
+      #     El nombre lo arman los scripts de build:
+      #       screenshot-tool-<VERSION>-<ARCH>.AppImage | ...-<TAG>.exe
       - name: Get version and date
         id: meta
         run: |
-          FILE=$(basename "$(ls OUT/screenshot-tool-*-*.AppImage | head -1)")
-          VERSION=$(echo "$FILE" | sed -E 's/^screenshot-tool-(.*)-[^-]+\.AppImage$/\1/')
+          FILE=$(basename "$(ls OUT/screenshot-tool-*-*.AppImage OUT/screenshot-tool-*-*.exe 2>/dev/null | head -1)")
+          VERSION=$(echo "$FILE" | sed -E 's/^screenshot-tool-(.*)-[^-]+\.(AppImage|exe)$/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "date=$(date +'%d-%m-%Y')" >> $GITHUB_OUTPUT
           echo "Archivo: $FILE -> version $VERSION"
@@ -72,14 +74,23 @@ jobs:
             - **screenshot-tool-*.AppImage** — paquete autocontenido para
               Linux x86_64 (todas las dependencias adentro, incluida
               libxcb-cursor para el plugin xcb de Qt)
+            - **screenshot-tool-*.exe** — ejecutable unico para Windows
+              x64/arm64 (onefile, sin instalacion)
 
-            ### Como usar
+            ### Como usar — Linux
             1. Descargar el `.AppImage`, darle permisos de ejecucion
                (`chmod +x`) y ejecutarlo con doble clic
             2. En distros sin FUSE 2 (Ubuntu 22.04+): ejecutar con
                `--appimage-extract-and-run`
             3. Preferencias: clic derecho en el icono del tray
+
+            ### Como usar — Windows
+            1. Descargar el `.exe` y ejecutarlo con doble clic
+            2. Si Smart App Control/SmartScreen lo bloquea: More info →
+               Run anyway (el exe no esta firmado)
+            3. Preferencias: clic derecho en el icono del tray
           files: |
             OUT/*.AppImage
+            OUT/*.exe
           draft: false
           prerelease: false

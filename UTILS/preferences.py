@@ -4,12 +4,14 @@ el próximo atajo presionado."""
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence
-from PyQt6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog,
-                             QDialogButtonBox, QDoubleSpinBox, QFileDialog,
-                             QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-                             QPushButton, QSpinBox, QTabWidget, QVBoxLayout,
+from UTILS.qt_compat.QtCore import Qt, pyqtSignal
+from UTILS.qt_compat.QtGui import QColor, QKeySequence
+from UTILS.qt_compat.QtWidgets import (QCheckBox, QColorDialog, QComboBox,
+                                       QDialog, QDialogButtonBox,
+                                       QDoubleSpinBox, QFileDialog,
+                                       QFormLayout, QHBoxLayout, QLabel,
+                                       QLineEdit, QPushButton, QSpinBox,
+                                       QTabWidget, QVBoxLayout,
                              QWidget)
 
 from UTILS.config import CONFIG_FILE
@@ -151,9 +153,14 @@ class PreferencesDialog(QDialog):
         self.prev_secs.setSingleStep(0.5)
         self.prev_secs.setValue(self.cfg["preview_seconds"])
         f.addRow("Duración preview (s):", self.prev_secs)
+        self.magnifier = QCheckBox("Mostrar lupa alrededor del cursor")
+        self.magnifier.setChecked(self.cfg["magnifier"])
+        f.addRow(self.magnifier)
         self.zoom = QSpinBox()
         self.zoom.setRange(2, 10)
         self.zoom.setValue(self.cfg["magnifier_zoom"])
+        self.zoom.setEnabled(self.magnifier.isChecked())
+        self.magnifier.toggled.connect(self.zoom.setEnabled)
         f.addRow("Zoom de la lupa:", self.zoom)
         self.thirds = QCheckBox("Mostrar regla de tercios")
         self.thirds.setChecked(self.cfg["thirds_grid"])
@@ -211,6 +218,7 @@ class PreferencesDialog(QDialog):
             "sound": self.sound.isChecked(),
             "float_preview": self.preview.isChecked(),
             "preview_seconds": self.prev_secs.value(),
+            "magnifier": self.magnifier.isChecked(),
             "magnifier_zoom": self.zoom.value(),
             "thirds_grid": self.thirds.isChecked(),
             "accent": getattr(self, "_accent_val", self.cfg["accent"]),
